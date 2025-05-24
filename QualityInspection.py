@@ -92,8 +92,7 @@ class GerenciadorInspetores:
             return
         
         try:
-            file = ctx.web.get_file_by_server_relative_url(self.arquivo_inspetores)
-            file_content = file.read().execute_query()
+            file_content = download_file_content(ctx, self.arquivo_inspetores)
             self.inspetores = json.loads(file_content.decode('utf-8'))
         except Exception:
             self.inspetores = self.inspetores_iniciais
@@ -232,9 +231,8 @@ def imagem_para_base64(caminho_imagem):
         return None
     
     try:
-        file = ctx.web.get_file_by_server_relative_url(caminho_imagem)
-        file.properties.execute_query()  # Testa a existência do arquivo
-        file_content = file.read()  # Lê o conteúdo da imagem (retorna bytes)
+        ctx.web.get_file_by_server_relative_url(caminho_imagem).properties.execute_query()
+        file_content = download_file_content(ctx, caminho_imagem) # Lê o conteúdo da imagem (retorna bytes)
         return base64.b64encode(file_content).decode('utf-8')
     except Exception as e:
         st.error(f"Erro ao carregar imagem do SharePoint: {e}")
@@ -455,8 +453,7 @@ def exportar_lista_completa_inspecoes(sharepoint_base=SHAREPOINT_DADOS_PATH):
     arquivo_inspecoes = f"{sharepoint_base}/inspecoes/inspecoes.json"
     
     try:
-        file = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes)
-        file_content = file.read()  # Lê o conteúdo do arquivo (retorna bytes)
+        file_content = download_file_content(ctx, arquivo_inspecoes)  # Lê o conteúdo do arquivo (retorna bytes)
         inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
         
         dados_relatorio = []
@@ -507,8 +504,7 @@ def salvar_inspecao(dados, sharepoint_base=SHAREPOINT_DADOS_PATH):
         
         # Tenta ler o arquivo existente
         try:
-            file = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes)
-            file_content = file.read().execute_query()
+            file_content = download_file_content(ctx, arquivo_inspecoes)
             inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
         except Exception:
             inspecoes = []  # Inicializa com lista vazia se o arquivo não existe
@@ -540,8 +536,7 @@ def gerar_relatorio(id_inspecao, sharepoint_base=SHAREPOINT_DADOS_PATH):
     arquivo_inspecoes = f"{sharepoint_base}/inspecoes/inspecoes.json"
     
     try:
-        file = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes)
-        file_content = file.read()  # Lê o conteúdo do arquivo (retorna bytes)
+        file_content = download_file_content(ctx, arquivo_inspecoes)  # Lê o conteúdo do arquivo (retorna bytes)
         inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
         
         inspecao = next((i for i in inspecoes if i.get('id_inspecao') == id_inspecao), None)
@@ -568,9 +563,8 @@ def listar_inspecoes(sharepoint_base=SHAREPOINT_DADOS_PATH):
     arquivo_inspecoes = f"{sharepoint_base}/inspecoes/inspecoes.json"
     
     try:
-        file = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes)
-        file.properties.execute_query()  # Testa a existência do arquivo
-        file_content = file.read()  # Lê o conteúdo do arquivo (retorna bytes)
+        ctx.web.get_file_by_server_relative_url(arquivo_inspecoes).properties.execute_query()
+        file_content = download_file_content(ctx, arquivo_inspecoes)  # Lê o conteúdo do arquivo (retorna bytes)
         
         inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
         
@@ -1188,8 +1182,7 @@ def main():
                 if ctx:
                     try:
                         arquivo_inspecoes = f"{SHAREPOINT_DADOS_PATH}/inspecoes/inspecoes.json"
-                        file = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes)
-                        file_content = file.read().execute_query()
+                        file_content = download_file_content(ctx, arquivo_inspecoes)
                         todas_inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
                         inspecao = next((i for i in todas_inspecoes if i.get('id_inspecao') == id_inspecao), None)
                         if inspecao:
