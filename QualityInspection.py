@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 import uuid
 from PIL import Image
+import hashlib
 import io
 import base64
 from typing import Dict, List, Optional
@@ -212,17 +213,33 @@ def salvar_imagem(imagem, prefixo="evidencia", sharepoint_path=SHAREPOINT_IMAGEN
 
 def componente_imagem(chave, label="Adicionar evidência visual", sharepoint_path=SHAREPOINT_IMAGENS_PATH):
     col1, col2 = st.columns(2)
+    caminho_key = f"imagem_path_{chave}"
+    hash_key = f"imagem_hash_{chave}"
     with col1:
-        arquivo_upload = st.file_uploader(f"{label} (Upload)", type=["jpg", "jpeg", "png"], key=f"upload_{chave}")
+        arquivo_upload = st.file_uploader(
+            f"{label} (Upload)", type=["jpg", "jpeg", "png"], key=f"upload_{chave}"
+        )
     with col2:
         usar_camera = st.checkbox("Usar câmera", key=f"camera_check_{chave}")
         if usar_camera:
             imagem_camera = st.camera_input("Capturar imagem", key=f"camera_{chave}")
             if imagem_camera:
-                return salvar_imagem(imagem_camera.getvalue(), f"evidencia_{chave}", sharepoint_path)
+                conteudo = imagem_camera.getvalue()
+                hash_imagem = hashlib.md5(conteudo).hexdigest()
+                if st.session_state.get(hash_key) != hash_imagem:
+                    st.session_state[hash_key] = hash_imagem
+                    st.session_state[caminho_key] = salvar_imagem(
+                        conteudo, f"evidencia_{chave}", sharepoint_path
+                    )
     if arquivo_upload:
-        return salvar_imagem(arquivo_upload.getvalue(), f"evidencia_{chave}", sharepoint_path)
-    return None
+        conteudo = arquivo_upload.getvalue()
+        hash_imagem = hashlib.md5(conteudo).hexdigest()
+        if st.session_state.get(hash_key) != hash_imagem:
+            st.session_state[hash_key] = hash_imagem
+            st.session_state[caminho_key] = salvar_imagem(
+                conteudo, f"evidencia_{chave}", sharepoint_path
+            )
+    return st.session_state.get(caminho_key)
 
 def imagem_para_base64(caminho_imagem):
     ctx = get_sharepoint_context()
