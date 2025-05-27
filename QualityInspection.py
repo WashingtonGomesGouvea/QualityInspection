@@ -13,6 +13,19 @@ from office365.runtime.auth.authentication_context import AuthenticationContext
 from office365.sharepoint.client_context import ClientContext
 import os
 
+def download_file_content(ctx, file_path):
+    return _cached_download_file_content(file_path, ctx)
+
+@st.cache_data
+def _cached_download_file_content(file_path, _ctx):
+    try:
+        file = _ctx.web.get_file_by_server_relative_url(file_path)
+        file_content = file.get_content().execute_query().value
+        return file_content
+    except Exception as e:
+        st.error(f"Erro ao baixar o arquivo {file_path}: {e}")
+        return None
+
 # Configuração da página
 st.set_page_config(
     page_title="Sistema de Inspeção Laboratorial - Synvia",
@@ -519,32 +532,50 @@ def salvar_inspecao(dados, sharepoint_base=SHAREPOINT_DADOS_PATH):
         # Cria a pasta se não existir
         ctx.web.folders.add(f"{sharepoint_base}/inspecoes").execute_query()
         
-        # Tenta ler o arquivo existente
+        # Lê o conteúdo atual do arquivo JSON
         try:
-            file_content = download_file_content(ctx, arquivo_inspecoes)
+            file_content = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes).get_content().execute_query().value
             inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
         except Exception:
-            inspecoes = []  # Inicializa com lista vazia se o arquivo não existe
+            inspecoes = []  # Se o arquivo não existir, começa com uma lista vazia
         
+        # Adiciona a nova inspeção
         inspecoes.append(dados)
+        
+        # Salva o arquivo JSON atualizado
         file_content = json.dumps(inspecoes, ensure_ascii=False, indent=4).encode('utf-8')
         target_folder = ctx.web.get_folder_by_server_relative_url(f"{sharepoint_base}/inspecoes")
         target_folder.upload_file("inspecoes.json", file_content).execute_query()
         
-        # Exporta para CSV e Excel
-        nome_arquivo_csv = f"{id_inspecao}.csv"
-        nome_arquivo_excel = f"{id_inspecao}.xlsx"
-        exportar_para_csv(dados, nome_arquivo_csv, sharepoint_base)
-        exportar_para_excel(dados, nome_arquivo_excel, sharepoint_base)
+        # Verifica se a inspeção foi salva corretamente
+        file_content_verificacao = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes).get_content().execute_query().value
+        inspecoes_verificacao = json.loads(file_content_verificacao.decode('utf-8'))
+        if not any(insp.get('id_inspecao') == id_inspecao for insp in inspecoes_verificacao):
+            st.error("Erro: A inspeção não foi salva corretamente no JSON.")
+            return None
         
-        # Atualiza o cache
-        st.session_state.inspecoes_cache = inspecoes
+        # Gera os relatórios CSV e Excel para a inspeção
+        dados_processados = processar_dados_para_exportacao(dados)
+        nome_arquivo_csv = f"relatorio_{id_inspecao}.csv"
+        nome_arquivo_excel = f"relatorio_{id_inspecao}.xlsx"
+        caminho_csv = exportar_para_csv(dados_processados, nome_arquivo_csv, sharepoint_base)
+        caminho_excel = exportar_para_excel(dados_processados, nome_arquivo_excel, sharepoint_base)
         
-        return id_inspecao
+        if not caminho_csv or not caminho_excel:
+            st.error("Erro ao gerar relatórios CSV ou Excel.")
+            return None
+        
+        # Limpa e recarrega o cache
+        get_inspecoes_cached.clear()
+        get_inspecoes_cached(sharepoint_base)
+        
+        st.success(f"Inspeção {id_inspecao} salva com sucesso!")
+        return id_inspecao, caminho_csv  # Retorna também o caminho do CSV para uso posterior
     except Exception as e:
         st.error(f"Erro ao salvar inspeção no SharePoint: {e}")
         return None
 
+# Função `gerar_relatorio` ajustada (opcional, já que agora é gerado em `salvar_inspecao`)
 def gerar_relatorio(id_inspecao, sharepoint_base=SHAREPOINT_DADOS_PATH):
     ctx = get_sharepoint_context()
     if not ctx:
@@ -553,7 +584,7 @@ def gerar_relatorio(id_inspecao, sharepoint_base=SHAREPOINT_DADOS_PATH):
     arquivo_inspecoes = f"{sharepoint_base}/inspecoes/inspecoes.json"
     
     try:
-        file_content = download_file_content(ctx, arquivo_inspecoes)  # Lê o conteúdo do arquivo (retorna bytes)
+        file_content = download_file_content(ctx, arquivo_inspecoes)
         inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
         
         inspecao = next((i for i in inspecoes if i.get('id_inspecao') == id_inspecao), None)
@@ -561,17 +592,23 @@ def gerar_relatorio(id_inspecao, sharepoint_base=SHAREPOINT_DADOS_PATH):
             st.error(f"Inspeção com ID {id_inspecao} não encontrada.")
             return None
         
-        nome_arquivo = f"relatorio_{id_inspecao}.csv"
-        caminho_arquivo = exportar_para_csv(inspecao, nome_arquivo, sharepoint_base)
+        dados_processados = processar_dados_para_exportacao(inspecao)
+        nome_arquivo_csv = f"relatorio_{id_inspecao}.csv"
+        caminho_csv = exportar_para_csv(dados_processados, nome_arquivo_csv, sharepoint_base)
         nome_arquivo_excel = f"relatorio_{id_inspecao}.xlsx"
-        exportar_para_excel(inspecao, nome_arquivo_excel, sharepoint_base)
+        caminho_excel = exportar_para_excel(dados_processados, nome_arquivo_excel, sharepoint_base)
         
-        return caminho_arquivo
+        if not caminho_csv or not caminho_excel:
+            st.error("Erro ao gerar relatórios CSV ou Excel.")
+            return None
+        
+        return caminho_csv
     except Exception as e:
         st.error(f"Erro ao gerar relatório: {e}")
         return None
-
-def listar_inspecoes(sharepoint_base=SHAREPOINT_DADOS_PATH):
+    
+@st.cache_data
+def get_inspecoes_cached(sharepoint_base=SHAREPOINT_DADOS_PATH):
     ctx = get_sharepoint_context()
     if not ctx:
         st.error("Não foi possível conectar ao SharePoint para listar inspeções.")
@@ -580,28 +617,31 @@ def listar_inspecoes(sharepoint_base=SHAREPOINT_DADOS_PATH):
     arquivo_inspecoes = f"{sharepoint_base}/inspecoes/inspecoes.json"
     
     try:
-        ctx.web.get_file_by_server_relative_url(arquivo_inspecoes).properties.execute_query()
-        file_content = download_file_content(ctx, arquivo_inspecoes)  # Lê o conteúdo do arquivo (retorna bytes)
-        
+        file = ctx.web.get_file_by_server_relative_url(arquivo_inspecoes)
+        file_content = file.get_content().execute_query().value
         inspecoes = json.loads(file_content.decode('utf-8')) if file_content else []
-        
-        st.session_state.inspecoes_cache = inspecoes
-        
-        return [
-            {
-                'id_inspecao': insp.get('id_inspecao', ''),
-                'data_inspecao': insp.get('informacoes_basicas', {}).get('data_inspecao', ''),
-                'nome_inspetor': insp.get('informacoes_basicas', {}).get('nome_inspetor', ''),
-                'empresa': insp.get('informacoes_basicas', {}).get('empresa', ''),
-                'setor': insp.get('informacoes_basicas', {}).get('setor', ''),
-                'processo': insp.get('processo_selecionado', '')
-            }
-            for insp in inspecoes
-        ]
+        return inspecoes
     except Exception as e:
-        st.error(f"Erro ao listar inspeções: {e}")
-        return []
+        if "File Not Found" in str(e):
+            st.warning("Arquivo de inspeções não encontrado. Nenhuma inspeção registrada.")
+            return []
+        else:
+            st.error(f"Erro ao listar inspeções: {e}")
+            return []
 
+def listar_inspecoes(sharepoint_base=SHAREPOINT_DADOS_PATH):
+    inspecoes = get_inspecoes_cached(sharepoint_base)
+    return [
+        {
+            'id_inspecao': insp.get('id_inspecao', ''),
+            'data_inspecao': insp.get('informacoes_basicas', {}).get('data_inspecao', ''),
+            'nome_inspetor': insp.get('informacoes_basicas', {}).get('nome_inspetor', ''),
+            'empresa': insp.get('informacoes_basicas', {}).get('empresa', ''),
+            'setor': insp.get('informacoes_basicas', {}).get('setor', ''),
+            'processo': insp.get('processo_selecionado', '')
+        }
+        for insp in inspecoes
+    ]
 # Componentes de Interface
 def tabela_avaliacao_erros(chave, erros=None):
     if erros is None:
