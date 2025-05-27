@@ -848,7 +848,7 @@ def processo_monitoramento_ambiental():
             "data_calibracao": data_calibracao.isoformat() if data_calibracao else None
         },
         "registros_3meses": registros_3meses,
-        "observações": observações
+        "observações": observacoes
     }
 
 def processo_equipamentos():
