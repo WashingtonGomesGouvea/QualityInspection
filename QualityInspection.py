@@ -1452,16 +1452,25 @@ def main():
 
         st.write("### Evidência Visual")
         evidencia = st.session_state.dados_inspecao.get('dados_formulario', {}).get('evidencia_visual')
-        if evidencia and ctx:
-            try:
-                file = ctx.web.get_file_by_server_relative_url(evidencia)
-                image_data = file.read().execute_query()
-                imagem = Image.open(io.BytesIO(image_data))
-                st.image(imagem, caption="Evidência Visual da Inspeção",  use_container_width=True)
-            except Exception as e:
-                st.error(f"Erro ao carregar imagem: {e}")
-        else:
+        if not ctx:
+            st.error("Falha na conexão com o SharePoint.")
+        elif not evidencia:
             st.info("Nenhuma evidência visual foi adicionada.")
+        else:
+            try:
+                # Obter o arquivo do SharePoint
+                file = ctx.web.get_file_by_server_relative_url(evidencia)
+                # Ler o conteúdo da imagem
+                image_data = file.get_content().execute_query().value
+                if not image_data:
+                    st.error("Nenhum conteúdo retornado ao ler a imagem.")
+                else:
+                    # Abrir e exibir a imagem
+                    imagem = Image.open(io.BytesIO(image_data))
+                    st.image(imagem, caption="Evidência Visual da Inspeção", use_container_width=True)
+            except Exception as e:
+                st.error(f"Erro ao carregar a imagem do SharePoint: {e}")
+                st.write(f"Caminho da imagem: {evidencia}")
 
         st.write("### Ações Adicionais")
         col1, col2 = st.columns(2)
@@ -1478,7 +1487,6 @@ def main():
                     st.session_state.etapas_concluidas.remove("Formulário do Processo")
                 except ValueError:
                     pass  # Evita erro se "Formulário do Processo" não estiver na lista
-                st.rerun()
-
+                st.rerun()            
 if __name__ == "__main__":
     main()
